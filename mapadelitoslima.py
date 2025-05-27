@@ -1,77 +1,70 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.linear_model import LinearRegression
 import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
 from datetime import datetime
 
-st.set_page_config(page_title="Predicción de Delitos en Lima", layout="wide")
-st.title("Predicción de Incidencias Delictivas en Lima Metropolitana")
-st.markdown("Análisis basado en datos históricos del año 2023")
+st.set_page_config(page_title="Predicción de Delitos - Lima", layout="wide")
+st.title("Análisis y Predicción de Delitos en Lima Metropolitana (Perú)")
 
-# Cargar datos
-@st.cache_data
-def cargar_datos():
-    return pd.read_csv("delitos_denunciados_2023_0.csv")
+# Cargar CSV
+uploaded_file = st.file_uploader("Sube el archivo CSV de delitos", type=["csv"])
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
 
-df = cargar_datos()
+    # Mostrar columnas disponibles
+    st.subheader("Columnas detectadas en el archivo:")
+    st.write(df.columns.tolist())
 
-# Preprocesamiento básico
-df["FECHA_HECHO"] = pd.to_datetime(df["FECHA_HECHO"], errors="coerce")
-df["AÑO"] = df["FECHA_HECHO"].dt.year
-df["MES"] = df["FECHA_HECHO"].dt.month
-df = df.dropna(subset=["FECHA_HECHO", "MES"])
+    # Intentar encontrar columna de fecha automáticamente
+    posibles_fechas = [col for col in df.columns if "fecha" in col.lower()]
+    if posibles_fechas:
+        fecha_col = posibles_fechas[0]
+        st.success(f"Usando la columna de fecha: {fecha_col}")
+        df[fecha_col] = pd.to_datetime(df[fecha_col], errors="coerce")
+        df = df.dropna(subset=[fecha_col])
+        df["AÑO"] = df[fecha_col].dt.year
+        df["MES"] = df[fecha_col].dt.month
+    else:
+        st.error("No se encontró una columna de fecha válida.")
+        st.stop()
 
-# Selección de distrito y tipo de delito
-distritos = sorted(df["DISTRITO"].dropna().unique())
-delitos = sorted(df["DELITO"].dropna().unique())
+    # Estadísticas simples
+    st.subheader("Estadísticas generales")
+    st.write("Total de delitos registrados:", len(df))
+    st.write("Años cubiertos:", df["AÑO"].unique())
 
-col1, col2 = st.columns(2)
-with col1:
-    distrito_sel = st.selectbox("Selecciona un distrito", distritos)
-with col2:
-    delito_sel = st.selectbox("Selecciona un tipo de delito", delitos)
+    # Gráfico por mes
+    st.subheader("Distribución de delitos por mes")
+    delitos_por_mes = df.groupby("MES").size()
+    fig, ax = plt.subplots()
+    ax.plot(delitos_por_mes.index, delitos_por_mes.values, marker="o")
+    ax.set_title("Delitos por mes")
+    ax.set_xlabel("Mes")
+    ax.set_ylabel("Número de delitos")
+    st.pyplot(fig)
 
-# Filtrar datos
-filtro = df[(df["DISTRITO"] == distrito_sel) & (df["DELITO"] == delito_sel)]
+    # Modelo predictivo simple por mes
+    st.subheader("Predicción simple de delitos por mes")
+    X = np.array(df["MES"]).reshape(-1, 1)
+    y = df.groupby("MES").size().values
+    y = y[:len(X)]  # Alinear dimensiones
 
-# Mostrar estadísticas
-st.subheader(f"Estadísticas en {distrito_sel} para {delito_sel}")
-st.write(f"Total de casos registrados: {len(filtro)}")
+    modelo = LinearRegression()
+    modelo.fit(X, y)
+    predicciones = modelo.predict(X)
 
-# Visualización histórica mensual
-conteo_mensual = filtro.groupby("MES").size().reindex(range(1, 13), fill_value=0)
+    fig2, ax2 = plt.subplots()
+    ax2.scatter(X, y, label="Histórico", color="blue")
+    ax2.plot(X, predicciones, label="Predicción", color="red")
+    ax2.set_title("Predicción de delitos por mes")
+    ax2.set_xlabel("Mes")
+    ax2.set_ylabel("Casos")
+    ax2.legend()
+    st.pyplot(fig2)
 
-fig, ax = plt.subplots(figsize=(10, 4))
-sns.lineplot(x=conteo_mensual.index, y=conteo_mensual.values, marker='o', ax=ax)
-ax.set_title("Casos Mensuales en 2023")
-ax.set_xlabel("Mes")
-ax.set_ylabel("Número de Casos")
-st.pyplot(fig)
-
-# Modelo predictivo simple para 2025
-X = conteo_mensual.index.values.reshape(-1, 1)
-y = conteo_mensual.values
-modelo = LinearRegression().fit(X, y)
-meses_2025 = np.array(range(1, 13)).reshape(-1, 1)
-predicciones = modelo.predict(meses_2025).round().astype(int)
-predicciones = np.clip(predicciones, a_min=0, a_max=None)
-
-# Mostrar predicción
-st.subheader("Proyección de casos para 2025")
-df_pred = pd.DataFrame({
-    "Mes": range(1, 13),
-    "Casos estimados": predicciones
-})
-st.dataframe(df_pred.set_index("Mes"))
-
-# Visualización de predicción
-fig2, ax2 = plt.subplots(figsize=(10, 4))
-sns.barplot(x=df_pred["Mes"], y=df_pred["Casos estimados"], palette="Reds", ax=ax2)
-ax2.set_title("Predicción mensual de delitos en 2025")
-ax2.set_xlabel("Mes")
-ax2.set_ylabel("Casos Estimados")
-st.pyplot(fig2)
-
-st.info("Esta es una herramienta predictiva basada en datos históricos. Para usos oficiales, se recomienda validar con entidades correspondientes.")
+    # Información de predicción
+    st.info("Este modelo usa regresión lineal simple con base en los datos históricos cargados. Para una predicción real a futuro, se puede integrar modelos avanzados con más variables.")
+else:
+    st.warning("Por favor, sube un archivo CSV válido para comenzar el análisis.")
